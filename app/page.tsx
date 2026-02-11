@@ -78,12 +78,10 @@ export default function Page() {
         return;
       }
 
-      // ✅ sparse만 끝나도 points.ply 보여준다
       if (data.status === "done_sparse" || data.status === "done_3dgs") {
         if (data.points_ply_url) setPlyUrl(`${API_BASE}${data.points_ply_url}`);
         if (data.splat_url) setSplatUrl(`${API_BASE}${data.splat_url}`);
-        // done_sparse면 ply는 나와야 하니까 일단 멈춤
-        return;
+        return; // stop polling
       }
 
       setTimeout(tick, 1200);
@@ -98,7 +96,7 @@ export default function Page() {
         CSRAI DEPLOY CHECK ✅
       </h1>
       <p style={{ opacity: 0.75, marginBottom: 18 }}>
-        업로드 → GPU/로컬 재구성 → PLY(필수) / SPLAT(선택) → 뷰어
+        업로드 → (GPU/로컬) 재구성 → PLY 필수 / SPLAT 선택 → 3D 시연
       </p>
 
       <div
@@ -148,7 +146,14 @@ export default function Page() {
       </div>
 
       {splatUrl && (
-        <div style={{ marginBottom: 18, padding: 12, border: "1px dashed rgba(0,0,0,0.25)", borderRadius: 12 }}>
+        <div
+          style={{
+            marginBottom: 18,
+            padding: 12,
+            border: "1px dashed rgba(0,0,0,0.25)",
+            borderRadius: 12,
+          }}
+        >
           <b>3DGS SPLAT:</b>{" "}
           <a href={splatUrl} target="_blank" rel="noreferrer">
             {splatUrl}
