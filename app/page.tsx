@@ -1,65 +1,182 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import React, { useMemo, useState } from "react";
+import PLYViewer from "./ply-viewer";
+
+type JobStatus = "queued" | "running" | "done_sparse" | "done_3dgs" | "failed";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
+export default function Page() {
+  const [files, setFiles] = useState<FileList | null>(null);
+  const [jobId, setJobId] = useState<string>("");
+  const [status, setStatus] = useState<JobStatus | "">("");
+  const [error, setError] = useState<string>("");
+  const [plyUrl, setPlyUrl] = useState<string>("");
+  const [splatUrl, setSplatUrl] = useState<string>("");
+
+  const canStart = useMemo(() => files && files.length >= 2, [files]);
+
+  async function createJob() {
+    setError("");
+    setPlyUrl("");
+    setSplatUrl("");
+    setJobId("");
+    setStatus("");
+
+    if (!canStart || !files) {
+      setError("사진을 최소 2장 이상 선택해줘.");
+      return;
+    }
+
+    const form = new FormData();
+    Array.from(files).forEach((f) => form.append("files", f));
+
+    const res = await fetch(`${API_BASE}/api/jobs`, {
+      method: "POST",
+      body: form,
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      setError(`Job 생성 실패: ${res.status} ${txt}`);
+      return;
+    }
+
+    const data = (await res.json()) as { job_id: string; status: JobStatus };
+    setJobId(data.job_id);
+    setStatus(data.status);
+
+    pollJob(data.job_id);
+  }
+
+  async function pollJob(id: string) {
+    setError("");
+
+    const tick = async () => {
+      const res = await fetch(`${API_BASE}/api/jobs/${id}`, { cache: "no-store" });
+      if (!res.ok) {
+        setError(`상태 조회 실패: ${res.status}`);
+        return;
+      }
+
+      const data = (await res.json()) as {
+        job_id: string;
+        status: JobStatus;
+        points_ply_url?: string | null;
+        splat_url?: string | null;
+        error?: string | null;
+        warning?: string | null;
+        hint?: string | null;
+      };
+
+      setStatus(data.status);
+
+      if (data.status === "failed") {
+        setError(data.error || "failed");
+        return;
+      }
+
+      // ✅ sparse만 끝나도 points.ply 보여준다
+      if (data.status === "done_sparse" || data.status === "done_3dgs") {
+        if (data.points_ply_url) setPlyUrl(`${API_BASE}${data.points_ply_url}`);
+        if (data.splat_url) setSplatUrl(`${API_BASE}${data.splat_url}`);
+        // done_sparse면 ply는 나와야 하니까 일단 멈춤
+        return;
+      }
+
+      setTimeout(tick, 1200);
+    };
+
+    tick();
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 6 }}>
+        CSRAI DEPLOY CHECK ✅
+      </h1>
+      <p style={{ opacity: 0.75, marginBottom: 18 }}>
+        업로드 → GPU/로컬 재구성 → PLY(필수) / SPLAT(선택) → 뷰어
+      </p>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          padding: 16,
+          borderRadius: 12,
+          border: "1px solid rgba(0,0,0,0.12)",
+          background: "rgba(0,0,0,0.03)",
+          marginBottom: 18,
+        }}
+      >
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => setFiles(e.target.files)}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+
+        <button
+          onClick={createJob}
+          disabled={!canStart}
+          style={{
+            height: 44,
+            borderRadius: 10,
+            border: "none",
+            cursor: canStart ? "pointer" : "not-allowed",
+            fontWeight: 900,
+          }}
+        >
+          재구성 시작
+        </button>
+
+        <div style={{ display: "grid", gap: 6 }}>
+          <div>
+            <b>API:</b> {API_BASE}
+          </div>
+          <div>
+            <b>jobId:</b> {jobId || "-"}
+          </div>
+          <div>
+            <b>status:</b> {status || "-"}
+          </div>
+          {error && <div style={{ color: "crimson" }}>{error}</div>}
+        </div>
+      </div>
+
+      {splatUrl && (
+        <div style={{ marginBottom: 18, padding: 12, border: "1px dashed rgba(0,0,0,0.25)", borderRadius: 12 }}>
+          <b>3DGS SPLAT:</b>{" "}
+          <a href={splatUrl} target="_blank" rel="noreferrer">
+            {splatUrl}
+          </a>
+          <div style={{ opacity: 0.7, marginTop: 6 }}>
+            (SPLAT 뷰어는 다음 단계에서 붙인다. 지금은 링크만 확인)
+          </div>
+        </div>
+      )}
+
+      {plyUrl ? (
+        <>
+          <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 10 }}>
+            3D Point Cloud Viewer (PLY)
+          </h2>
+          <PLYViewer plyUrl={plyUrl} />
+          <p style={{ marginTop: 10, opacity: 0.75 }}>
+            다운로드:{" "}
+            <a href={plyUrl} target="_blank" rel="noreferrer">
+              points.ply
+            </a>
           </p>
+        </>
+      ) : (
+        <div style={{ opacity: 0.7 }}>
+          아직 points.ply가 없어. “재구성 시작” 누르고 done_sparse / done_3dgs까지 가면 뜬다.
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }
